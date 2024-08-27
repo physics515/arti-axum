@@ -351,12 +351,17 @@ fn native_tls_acceptor(key_file: PathBuf, cert_file: PathBuf) -> TlsAcceptor {
             panic!("Failed to read key file: {} at {}", e, key_file.display());
         }
     };
+
+    println!("key_pem: {}", key_pem);
+
     let cert_pem = match std::fs::read_to_string(&cert_file) {
         Ok(cert_pem) => cert_pem,
         Err(e) => {
             panic!("Failed to read cert file: {} at {}", e, cert_file.display());
         }
     };
+
+    println!("cert_pem: {}", cert_pem);
 
     let id = Identity::from_pkcs8(cert_pem.as_bytes(), key_pem.as_bytes()).unwrap();
     TlsAcceptor::builder(id)
