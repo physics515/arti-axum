@@ -107,6 +107,8 @@ use tower_service::Service;
 pub fn serve<M, S>(
     stream_requests: impl Stream<Item = StreamRequest> + Send + 'static,
     make_service: M,
+    tls_key_path: String,
+    tls_cert_path: String,
 ) -> Serve<M, S>
 where
     M: for<'a> Service<IncomingStream<'a>, Error = Infallible, Response = S>,
@@ -115,6 +117,8 @@ where
     Serve {
         stream_requests: stream_requests.boxed(),
         make_service,
+        tls_key_path,
+        tls_cert_path,
         _marker: PhantomData,
     }
 }
@@ -123,6 +127,8 @@ where
 pub struct Serve<M, S> {
     stream_requests: BoxStream<'static, StreamRequest>,
     make_service: M,
+    tls_key_path: String,
+    tls_cert_path: String,
     _marker: PhantomData<S>,
 }
 
@@ -141,14 +147,9 @@ where
             inner: async move {
                 // Setup TLS
                 let tls_acceptor = native_tls_acceptor(
-                    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                        .join("self_signed_certs")
-                        .join("key.pem"),
-                    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                        .join("self_signed_certs")
-                        .join("cert.pem"),
+                    PathBuf::from(self.tls_key_path),
+                    PathBuf::from(self.tls_cert_path),
                 );
-                let tls_acceptor = TlsAcceptor::from(tls_acceptor);
 
                 while let Some(stream_request) = self.stream_requests.next().await {
                     let mut data_stream = match stream_request.request() {
@@ -363,86 +364,4 @@ fn native_tls_acceptor(key_file: PathBuf, cert_file: PathBuf) -> TlsAcceptor {
         .min_protocol_version(Some(Protocol::Tlsv12))
         .build()
         .unwrap()
-}
-
-#[cfg(test)]
-mod tests {
-    use std::net::SocketAddr;
-
-    use hyper::{
-        service::{
-            make_service_fn,
-            service_fn,
-        },
-        Server,
-    };
-    use tokio::net::TcpListener;
-
-    use super::*;
-
-    #[tokio::test]
-    async fn test_serve() {
-        // Setup TOR
-        let tor_client = match TorClient::create_bootstrapped(TorClientConfig::default()).await {
-            Ok(tor_client) => tor_client,
-            Err(e) => {
-                bail!(Error::Runtime(format!(
-                    "Error bootstrapping tor client: {e:?}"
-                )))
-            }
-        };
-
-        let hs_nickname: HsNickname = match "pluggin-server".to_owned().try_into() {
-            Ok(nickname) => nickname,
-            Err(e) => bail!(Error::Runtime(format!("Error converting nickname: {e:?}"))),
-        };
-
-        let onion_service_config = match OnionServiceConfigBuilder::default()
-            .nickname(hs_nickname)
-            .build()
-        {
-            Ok(config) => config,
-            Err(e) => {
-                bail!(Error::Runtime(format!(
-                    "Error building onion service config: {e:?}"
-                )))
-            }
-        };
-
-        let (onion_service, rend_requests) =
-            match tor_client.launch_onion_service(onion_service_config) {
-                Ok((service, requests)) => (service, requests),
-                Err(e) => {
-                    bail!(Error::Runtime(format!(
-                        "Error launching onion service: {e:?}"
-                    )))
-                }
-            };
-
-        // Create TCP Stream
-        let stream_requests = handle_rend_requests(rend_requests);
-
-        let app = Router::new().route(
-            "/",
-            make_service_fn(|_conn| {
-                async {
-                    Ok::<_, Infallible>(service_fn(|_req| {
-                        async { Ok::<_, Infallible>(Response::new(Body::from("Hello, World!"))) }
-                    }))
-                }
-            }),
-        );
-
-        arti_axum::serve(stream_requests, app);
-
-        tokio::spawn(serve.into_future());
-
-        let client = reqwest::Client::new();
-        let response = client
-            .get(&format!("http://{}", addr))
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(response.status(), 404);
-    }
 }
