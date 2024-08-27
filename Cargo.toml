@@ -24,7 +24,11 @@ tor-proto = { version = "0.20.0", features = ["hs-service", "tokio"] }
 tower = "0.4.13"
 tower-service = "0.3.2"
 tracing = "0.1.40"
+native-tls = "0"
 
 [dev-dependencies]
 tokio = { version = "1.38.1", features = ["macros", "rt-multi-thread"] }
-arti-client = { version = "0.20.0", features = ["tokio", "onion-service-service"]}
+arti-client = { version = "0.20.0", features = [
+        "tokio",
+        "onion-service-service",
+] }
