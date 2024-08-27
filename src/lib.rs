@@ -344,8 +344,18 @@ impl Service<IncomingStream<'_>> for Router<()> {
 }
 
 fn native_tls_acceptor(key_file: PathBuf, cert_file: PathBuf) -> TlsAcceptor {
-    let key_pem = std::fs::read_to_string(&key_file).unwrap();
-    let cert_pem = std::fs::read_to_string(&cert_file).unwrap();
+    let key_pem = match std::fs::read_to_string(&key_file) {
+        Ok(key_pem) => key_pem,
+        Err(e) => {
+            panic!("Failed to read key file: {} at {}", e, key_file.display());
+        }
+    };
+    let cert_pem = match std::fs::read_to_string(&cert_file) {
+        Ok(cert_pem) => cert_pem,
+        Err(e) => {
+            panic!("Failed to read cert file: {} at {}", e, cert_file.display());
+        }
+    };
 
     let id = Identity::from_pkcs8(cert_pem.as_bytes(), key_pem.as_bytes()).unwrap();
     TlsAcceptor::builder(id)
