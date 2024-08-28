@@ -50,6 +50,7 @@ use std::{
     marker::PhantomData,
     path::PathBuf,
     pin::Pin,
+    sync::LazyLock,
     task::{
         Context,
         Poll,
@@ -90,7 +91,7 @@ use native_tls::{
     TlsStream,
 };
 use pin_project_lite::pin_project;
-use tokio::runtime::Handle;
+use tokio::sync::Mutex as TokioMutex;
 use tor_cell::relaycell::msg::Connected;
 use tor_hsservice::StreamRequest;
 use tor_proto::stream::{
@@ -102,6 +103,9 @@ use tower::util::{
     ServiceExt,
 };
 use tower_service::Service;
+
+static DATA_STREAM_LOCK: LazyLock<TokioMutex<Option<DataStream>>> =
+    LazyLock::new(|| TokioMutex::new(None));
 
 /// Serve the service with the supplied stream requests.
 ///
@@ -154,7 +158,7 @@ where
                 );
 
                 while let Some(stream_request) = self.stream_requests.next().await {
-                    let mut data_stream = match stream_request.request() {
+                    let data_stream = match stream_request.request() {
                         IncomingStreamRequest::Begin(_) => {
                             match stream_request.accept(Connected::new_empty()).await {
                                 Ok(data_stream) => data_stream,
@@ -174,9 +178,20 @@ where
                         .await
                         .unwrap_or_else(|err| match err {});
 
-                    let tls_data_stream = TlsDataStream {
-                        data_stream: &mut data_stream,
-                    };
+                    std::thread::spawn(move || {
+                        let runtime = tokio::runtime::Builder::new_current_thread()
+                            .enable_all()
+                            .build()
+                            .unwrap();
+
+                        runtime.block_on(async {
+                            DATA_STREAM_LOCK.lock().await.replace(data_stream);
+                        })
+                    })
+                    .join()
+                    .unwrap();
+
+                    let tls_data_stream = TlsDataStream;
 
                     let mut stream = tls_acceptor.accept(tls_data_stream).unwrap();
 
@@ -195,12 +210,10 @@ where
                     };
 
                     tokio::spawn(async move {
+                        let datastream = DATA_STREAM_LOCK.lock().await.take().unwrap();
                         match Builder::new(TokioExecutor::new())
                             // upgrades needed for websockets
-                            .serve_connection_with_upgrades(
-                                TokioIo::new(data_stream),
-                                hyper_service,
-                            )
+                            .serve_connection_with_upgrades(TokioIo::new(datastream), hyper_service)
                             .await
                         {
                             Ok(()) => {}
@@ -281,27 +294,74 @@ where
     }
 }
 
-#[derive(Debug)]
-pub struct TlsDataStream<'a> {
-    data_stream: &'a mut DataStream,
-}
+use std::sync::Arc;
 
-impl Read for TlsDataStream<'_> {
+#[derive(Debug, Clone)]
+pub struct TlsDataStream;
+
+impl Read for TlsDataStream {
     #[tokio::main]
     async fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        Handle::current().block_on(async { self.data_stream.read(buf).await })
+        let buf_arc = Arc::new(TokioMutex::new(Vec::new()));
+        let buf_arc_clone = buf_arc.clone();
+        let (res, b_res) = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+
+            runtime.block_on(async {
+                let mut binding = DATA_STREAM_LOCK.lock().await;
+                let data_stream = binding.as_mut().unwrap();
+                let res = data_stream.read(buf_arc_clone.lock().await.as_mut()).await;
+                let buf = buf_arc_clone.lock().await.clone();
+                (res, buf)
+            })
+        })
+        .join()
+        .unwrap();
+
+        buf.copy_from_slice(&b_res);
+        res
     }
 }
 
-impl Write for TlsDataStream<'_> {
+impl Write for TlsDataStream {
     #[tokio::main]
     async fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        Handle::current().block_on(async { self.data_stream.write(buf).await })
+        let new_buf = Arc::new(TokioMutex::new(buf.to_vec()));
+        std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+
+            runtime.block_on(async {
+                let mut binding = DATA_STREAM_LOCK.lock().await;
+                let data_stream = binding.as_mut().unwrap();
+                data_stream.write(&new_buf.lock().await).await
+            })
+        })
+        .join()
+        .unwrap()
     }
 
     #[tokio::main]
     async fn flush(&mut self) -> io::Result<()> {
-        Handle::current().block_on(async { self.data_stream.flush().await })
+        std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+
+            runtime.block_on(async {
+                let mut binding = DATA_STREAM_LOCK.lock().await;
+                let data_stream = binding.as_mut().unwrap();
+                data_stream.flush().await
+            })
+        })
+        .join()
+        .unwrap()
     }
 }
 
@@ -313,7 +373,7 @@ impl Write for TlsDataStream<'_> {
 pub struct IncomingStream<'a> {
     // in the future we can use this to return information about the circuit used etc.
     #[allow(dead_code)]
-    data_stream: &'a mut TlsStream<TlsDataStream<'a>>,
+    data_stream: &'a mut TlsStream<TlsDataStream>,
 }
 
 impl Read for IncomingStream<'_> {
