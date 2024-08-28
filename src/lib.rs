@@ -96,8 +96,12 @@ where
 	fn into_future(mut self) -> Self::IntoFuture {
 		private::ServeFuture {
 			inner: async move {
+				println!("IntoFuture called");
+
 				// Setup TLS
 				let tls_acceptor = native_tls_acceptor(PathBuf::from(self.tls_key_path), PathBuf::from(self.tls_cert_path));
+
+				println!("tls acceptor created");
 
 				while let Some(stream_request) = self.stream_requests.next().await {
 					let data_stream = match stream_request.request() {
@@ -116,9 +120,12 @@ where
 						}
 					};
 
+					println!("accepted stream");
+
 					poll_fn(|cx| self.make_service.poll_ready(cx)).await.unwrap_or_else(|err| match err {});
 
-					println!("accepted stream");
+					println!("service ready");
+
 					std::thread::spawn(move || {
 						let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
 
@@ -133,7 +140,11 @@ where
 
 					let d_stream = DStream;
 
+					println!("created DStream");
+
 					let stream = tls_acceptor.accept(d_stream).unwrap();
+
+					println!("accepted tls stream");
 
 					std::thread::spawn(move || {
 						let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
@@ -145,9 +156,11 @@ where
 					.join()
 					.unwrap();
 
+					println!("moved stream to TLS_DATA_STREAM_LOCK");
+
 					let tls_d_stream = TlsDStream;
 
-					println!("accepted tls stream");
+					println!("created TlsDStream");
 
 					let incoming_stream = IncomingStream;
 
