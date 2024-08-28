@@ -1,4 +1,5 @@
-#![allow(clippy::tabs_in_doc_comments)]
+#![warn(clippy::pedantic, clippy::nursery, clippy::all, clippy::cargo)]
+#![allow(clippy::multiple_crate_versions, clippy::module_name_repetitions, clippy::tabs_in_doc_comments)]
 
 //!
 //! This crate allows you to run your [axum][1] http server as a tor hidden
@@ -131,7 +132,7 @@ where
 
 						runtime.block_on(async {
 							DATA_STREAM_LOCK.lock().await.replace(data_stream);
-						})
+						});
 					})
 					.join()
 					.unwrap();
@@ -151,7 +152,7 @@ where
 
 						runtime.block_on(async {
 							TLS_DATA_STREAM_LOCK.lock().await.replace(stream);
-						})
+						});
 					})
 					.join()
 					.unwrap();
@@ -203,7 +204,7 @@ where
 }
 
 mod private {
-	use super::*;
+	use super::{BoxFuture, Context, Future, FutureExt, Pin, Poll};
 
 	pub struct ServeFuture {
 		pub inner: BoxFuture<'static, ()>,
@@ -267,14 +268,12 @@ pub struct TlsDStream;
 impl Read for TlsDStream {
 	fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
 		let buf_arc = Arc::new(TokioMutex::new(Vec::new()));
-		let buf_arc_clone = buf_arc.clone();
+		let buf_arc_clone = buf_arc;
 		let (res, b_res) = std::thread::spawn(move || {
 			let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
 
 			runtime.block_on(async {
-				let mut binding = TLS_DATA_STREAM_LOCK.lock().await;
-				let data_stream = binding.as_mut().unwrap();
-				let res = data_stream.read(buf_arc_clone.lock().await.as_mut());
+				let res = TLS_DATA_STREAM_LOCK.lock().await.as_mut().unwrap().read(buf_arc_clone.lock().await.as_mut());
 				let buf = buf_arc_clone.lock().await.clone();
 				(res, buf)
 			})
@@ -295,14 +294,12 @@ impl Read for TlsDStream {
 impl tokio::io::AsyncRead for TlsDStream {
 	fn poll_read(self: Pin<&mut Self>, _cx: &mut Context<'_>, buf: &mut tokio::io::ReadBuf) -> Poll<io::Result<()>> {
 		let buf_arc = Arc::new(TokioMutex::new(Vec::new()));
-		let buf_arc_clone = buf_arc.clone();
+		let buf_arc_clone = buf_arc;
 		let (res, b_res) = std::thread::spawn(move || {
 			let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
 
 			runtime.block_on(async {
-				let mut binding = TLS_DATA_STREAM_LOCK.lock().await;
-				let data_stream = binding.as_mut().unwrap();
-				let res = data_stream.read(buf_arc_clone.lock().await.as_mut());
+				let res = TLS_DATA_STREAM_LOCK.lock().await.as_mut().unwrap().read(buf_arc_clone.lock().await.as_mut());
 				let buf = buf_arc_clone.lock().await.clone();
 				(res, buf)
 			})
@@ -327,9 +324,9 @@ impl tokio::io::AsyncWrite for TlsDStream {
 			let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
 
 			runtime.block_on(async {
-				let mut binding = TLS_DATA_STREAM_LOCK.lock().await;
-				let data_stream = binding.as_mut().unwrap();
-				data_stream.write(&new_buf.lock().await)
+				let res = TLS_DATA_STREAM_LOCK.lock().await.as_mut().unwrap().write(&new_buf.lock().await);
+				res
+				//data_stream.write(&new_buf.lock().await)
 			})
 		})
 		.join()
@@ -343,9 +340,8 @@ impl tokio::io::AsyncWrite for TlsDStream {
 			let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
 
 			runtime.block_on(async {
-				let mut binding = DATA_STREAM_LOCK.lock().await;
-				let data_stream = binding.as_mut().unwrap();
-				data_stream.flush().await
+				let res = TLS_DATA_STREAM_LOCK.lock().await.as_mut().unwrap().flush();
+				res
 			})
 		})
 		.join()
@@ -365,14 +361,12 @@ pub struct DStream;
 impl Read for DStream {
 	fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
 		let buf_arc = Arc::new(TokioMutex::new(Vec::new()));
-		let buf_arc_clone = buf_arc.clone();
+		let buf_arc_clone = buf_arc;
 		let (res, b_res) = std::thread::spawn(move || {
 			let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
 
 			runtime.block_on(async {
-				let mut binding = DATA_STREAM_LOCK.lock().await;
-				let data_stream = binding.as_mut().unwrap();
-				let res = data_stream.read(buf_arc_clone.lock().await.as_mut()).await;
+				let res = DATA_STREAM_LOCK.lock().await.as_mut().unwrap().read(buf_arc_clone.lock().await.as_mut()).await;
 				let buf = buf_arc_clone.lock().await.clone();
 				(res, buf)
 			})
@@ -391,11 +385,7 @@ impl Write for DStream {
 		std::thread::spawn(move || {
 			let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
 
-			runtime.block_on(async {
-				let mut binding = DATA_STREAM_LOCK.lock().await;
-				let data_stream = binding.as_mut().unwrap();
-				data_stream.write(&new_buf.lock().await).await
-			})
+			runtime.block_on(async { DATA_STREAM_LOCK.lock().await.as_mut().unwrap().write(&new_buf.lock().await).await })
 		})
 		.join()
 		.unwrap()
@@ -405,11 +395,7 @@ impl Write for DStream {
 		std::thread::spawn(move || {
 			let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
 
-			runtime.block_on(async {
-				let mut binding = DATA_STREAM_LOCK.lock().await;
-				let data_stream = binding.as_mut().unwrap();
-				data_stream.flush().await
-			})
+			runtime.block_on(async { DATA_STREAM_LOCK.lock().await.as_mut().unwrap().flush().await })
 		})
 		.join()
 		.unwrap()
@@ -419,14 +405,12 @@ impl Write for DStream {
 impl tokio::io::AsyncRead for DStream {
 	fn poll_read(self: Pin<&mut Self>, _cx: &mut Context<'_>, buf: &mut tokio::io::ReadBuf) -> Poll<io::Result<()>> {
 		let buf_arc = Arc::new(TokioMutex::new(Vec::new()));
-		let buf_arc_clone = buf_arc.clone();
+		let buf_arc_clone = buf_arc;
 		let (_, b_res) = std::thread::spawn(move || {
 			let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
 
 			runtime.block_on(async {
-				let mut binding = DATA_STREAM_LOCK.lock().await;
-				let data_stream = binding.as_mut().unwrap();
-				let res = data_stream.read(buf_arc_clone.lock().await.as_mut()).await;
+				let res = DATA_STREAM_LOCK.lock().await.as_mut().unwrap().read(buf_arc_clone.lock().await.as_mut()).await;
 				let buf = buf_arc_clone.lock().await.clone();
 				(res, buf)
 			})
