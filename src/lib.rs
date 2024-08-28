@@ -70,6 +70,7 @@ where
 	M: for<'a> Service<IncomingStream, Error = Infallible, Response = S>,
 	S: Service<Request, Error = Infallible, Response = Response>,
 {
+	println!("serve called");
 	Serve { stream_requests: stream_requests.boxed(), make_service, tls_key_path, tls_cert_path, _marker: PhantomData }
 }
 
