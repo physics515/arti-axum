@@ -301,8 +301,7 @@ use std::sync::Arc;
 pub struct TlsDataStream;
 
 impl Read for TlsDataStream {
-    #[tokio::main]
-    async fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let buf_arc = Arc::new(TokioMutex::new(Vec::new()));
         let buf_arc_clone = buf_arc.clone();
         let (res, b_res) = std::thread::spawn(move || {
@@ -329,8 +328,7 @@ impl Read for TlsDataStream {
 }
 
 impl Write for TlsDataStream {
-    #[tokio::main]
-    async fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let new_buf = Arc::new(TokioMutex::new(buf.to_vec()));
         std::thread::spawn(move || {
             let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -349,8 +347,7 @@ impl Write for TlsDataStream {
         .unwrap()
     }
 
-    #[tokio::main]
-    async fn flush(&mut self) -> io::Result<()> {
+    fn flush(&mut self) -> io::Result<()> {
         std::thread::spawn(move || {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(1)
