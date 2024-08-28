@@ -33,6 +33,8 @@
 //!
 //! [1]: https://docs.rs/axum/latest/axum/index.html
 //! [2]: https://gitlab.torproject.org/tpo/core/arti/
+#![feature(async_closure)]
+
 use std::{
     convert::Infallible,
     future::{
@@ -285,21 +287,21 @@ pub struct TlsDataStream<'a> {
 }
 
 impl Read for TlsDataStream<'_> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let read = Handle::current().block_on(async { self.data_stream.read(buf).await });
-        read
+    #[tokio::main]
+    async fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        Handle::current().block_on(async { self.data_stream.read(buf).await })
     }
 }
 
 impl Write for TlsDataStream<'_> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let write = Handle::current().block_on(async { self.data_stream.write(buf).await });
-        write
+    #[tokio::main]
+    async fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        Handle::current().block_on(async { self.data_stream.write(buf).await })
     }
 
-    fn flush(&mut self) -> io::Result<()> {
-        let flush = Handle::current().block_on(async { self.data_stream.flush().await });
-        flush
+    #[tokio::main]
+    async fn flush(&mut self) -> io::Result<()> {
+        Handle::current().block_on(async { self.data_stream.flush().await })
     }
 }
 

@@ -17,7 +17,7 @@ futures-util = "0.3.30"
 hyper = "1.4.1"
 hyper-util = "0.1.6"
 pin-project-lite = "0.2.14"
-tokio = "1.38.1"
+tokio = { version = "1", features = ["full"] }
 tor-cell = "0.20.0"
 tor-hsservice = "0.20.0"
 tor-proto = { version = "0.20.0", features = ["hs-service", "tokio"] }
@@ -25,6 +25,7 @@ tower = "0.4.13"
 tower-service = "0.3.2"
 tracing = "0.1.40"
 native-tls = "0"
+futures = "0"
 
 [dev-dependencies]
 tokio = { version = "1.38.1", features = ["macros", "rt-multi-thread"] }
