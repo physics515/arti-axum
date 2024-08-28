@@ -179,7 +179,8 @@ where
                         .unwrap_or_else(|err| match err {});
 
                     std::thread::spawn(move || {
-                        let runtime = tokio::runtime::Builder::new_current_thread()
+                        let runtime = tokio::runtime::Builder::new_multi_thread()
+                            .worker_threads(1)
                             .enable_all()
                             .build()
                             .unwrap();
@@ -305,7 +306,8 @@ impl Read for TlsDataStream {
         let buf_arc = Arc::new(TokioMutex::new(Vec::new()));
         let buf_arc_clone = buf_arc.clone();
         let (res, b_res) = std::thread::spawn(move || {
-            let runtime = tokio::runtime::Builder::new_current_thread()
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
                 .enable_all()
                 .build()
                 .unwrap();
@@ -331,7 +333,8 @@ impl Write for TlsDataStream {
     async fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let new_buf = Arc::new(TokioMutex::new(buf.to_vec()));
         std::thread::spawn(move || {
-            let runtime = tokio::runtime::Builder::new_current_thread()
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
                 .enable_all()
                 .build()
                 .unwrap();
@@ -349,7 +352,8 @@ impl Write for TlsDataStream {
     #[tokio::main]
     async fn flush(&mut self) -> io::Result<()> {
         std::thread::spawn(move || {
-            let runtime = tokio::runtime::Builder::new_current_thread()
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
                 .enable_all()
                 .build()
                 .unwrap();
