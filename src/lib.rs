@@ -381,14 +381,20 @@ impl Read for DStream {
 
 impl Write for DStream {
 	fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+		println!("DStream::write: writing to DStream");
 		let new_buf = Arc::new(TokioMutex::new(buf.to_vec()));
-		std::thread::spawn(move || {
+		println!("DStream::write: created new_buf");
+		let res = std::thread::spawn(move || {
+			println!("DStream::write: spwaned thread");
 			let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
+			println!("DStream::write: created runtime");
 
 			runtime.block_on(async { DATA_STREAM_LOCK.lock().await.as_mut().unwrap().write(&new_buf.lock().await).await })
 		})
 		.join()
-		.unwrap()
+		.unwrap();
+		println!("DStream::write: wrote to DStream: {res:?}");
+		res
 	}
 
 	fn flush(&mut self) -> io::Result<()> {
